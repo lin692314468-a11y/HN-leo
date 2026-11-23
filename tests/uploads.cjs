@@ -1,0 +1,11 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const ctx={Array,console};vm.createContext(ctx);vm.runInContext(fs.readFileSync('dist/uploads.js','utf8'),ctx);
+let handlers={},classes=new Set(),received=null;
+const zone={addEventListener:(n,f)=>handlers[n]=f,classList:{add:v=>classes.add(v),remove:v=>classes.delete(v)}};
+ctx.zone=zone;ctx.receive=f=>received=f;vm.runInContext('bindFileDrop(zone,receive)',ctx);
+const files=[{name:'first.png'},{name:'second.jpg'}];let stopped=false,prevented=false;
+const event=()=>({dataTransfer:{types:['Files'],files},preventDefault:()=>prevented=true,stopPropagation:()=>stopped=true});
+handlers.dragenter(event());handlers.dragenter(event());assert(classes.has('drop-active'));handlers.dragleave(event());assert(classes.has('drop-active'));handlers.dragover(event());handlers.drop(event());assert(!classes.has('drop-active'));assert.equal(received.length,2);assert(stopped&&prevented);received=null;handlers.drop({dataTransfer:{types:['text/plain'],files:[]}});assert.equal(received,null);
+let app=fs.readFileSync('dist/app.js','utf8'),calls=[];ctx.notify=m=>ctx.message=m;ctx.copies=Array.from({length:5},(_,i)=>({image:i}));ctx.revision=0;ctx.refresh=()=>{};ctx.uploadTo=async(file,index)=>calls.push({file,index});ctx.readImage=async file=>{if(file.bad)throw Error('Invalid image');return file.name};
+vm.runInContext(app.slice(app.indexOf('async function replaceFromFiles'),app.indexOf("$('images').onchange=")),ctx);
+(async()=>{ctx.files=files;await vm.runInContext('replaceFromFiles(files,3)',ctx);assert.equal(calls.length,0);await vm.runInContext('replaceFromFiles([files[0]],3)',ctx);assert.equal(calls[0].index,3);await vm.runInContext('uploadBatch(files)',ctx);assert.equal(ctx.copies[0].image,'first.png');assert.equal(ctx.copies[1].image,'second.jpg');assert.equal(ctx.copies[2].image,2);await vm.runInContext('uploadBatch(Array(6).fill(files[0]))',ctx);assert.equal(ctx.copies[2].image,2);await vm.runInContext('uploadBatch([{name:"replace.png"},{bad:true}])',ctx);assert.equal(ctx.copies[0].image,'first.png');console.log('PASS: nested drag highlight, file-only drops, target slot, single-file guard, ordered batch, 5-file limit and atomic failure')})().catch(e=>{console.error(e);process.exit(1)});
